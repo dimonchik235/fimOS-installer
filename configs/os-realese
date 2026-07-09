@@ -1,1 +1,10 @@
-
+NAME="fimOS"
+PRETTY_NAME="fimOS Linux"
+ID=fimos
+LIKE=artix
+BUILD_ID=rolling
+ANSI_COLOR="0;36"
+HOME_URL="https://github.com/dimonchik235/fimOS-installer"
+DOCUMENTATION_URL="https://github.com/dimonchik235/fimOS-installer"
+SUPPORT_URL="https://github.com/dimonchik235/fimOS-installer"
+BUG_REPORT_URL="https://github.com/dimonchik235/fimOS-installer/issues"
