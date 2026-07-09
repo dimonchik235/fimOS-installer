@@ -1,1 +1,87 @@
-
+{
+  "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+  "logo": {
+    "source": "/etc/xdg/fastfetch/fimos_logo.txt",
+    "padding": {
+      "top": 2,
+      "left": 2,
+      "right": 4
+    },
+    // Цвета для логотипа (1 - первый цвет, 2 - второй, если в арте используются управляющие символы)
+    // В данном случае сделаем его неоново-бирюзовым (cyan)
+    "color": {
+      "1": "cyan"
+    }
+  },
+  "display": {
+    "separator": " ➔  ",
+    "color": {
+      "keys": "magenta",
+      "output": "white"
+    },
+    "key": {
+      "width": 15
+    }
+  },
+  "modules": [
+    "title",
+    {
+      "type": "custom",
+      "format": "──────────────────────────────────────"
+    },
+    {
+      "type": "os",
+      "key": "OS",
+      "format": "{3} {12}" // Выведет: fimOS Linux (x86_64)
+    },
+    {
+      "type": "kernel",
+      "key": "Kernel",
+      "format": "{2}" // Подсветит, что используется ядро cachyos
+    },
+    {
+      "type": "init",
+      "key": "Init System",
+      "format": "{1}" // Покажет runit вместо systemd
+    },
+    {
+      "type": "uptime",
+      "key": "Uptime"
+    },
+    {
+      "type": "packages",
+      "key": "Packages",
+      // Динамически посчитает пакеты из pacman, flatpak и snap
+      "format": "{1} (pacman)[, {4} (flatpak)][, {5} (snap)]"
+    },
+    {
+      "type": "wm",
+      "key": "WM",
+      "format": "{1}" // Покажет Hyprland
+    },
+    {
+      "type": "terminal",
+      "key": "Terminal"
+    },
+    {
+      "type": "cpu",
+      "key": "CPU",
+      "format": "{1}"
+    },
+    {
+      "type": "gpu",
+      "key": "GPU",
+      "format": "{2}"
+    },
+    {
+      "type": "memory",
+      "key": "Memory",
+      "format": "{1} / {2} ({3})" // Важно для мониторинга твоей 1 ГБ планки!
+    },
+    "break",
+    {
+      "type": "colors",
+      "symbol": "circle" // Красивые цветные кружочки палитры в конце
+    }
+  ]
+}
