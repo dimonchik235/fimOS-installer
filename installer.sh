@@ -5,7 +5,7 @@
 
 # 1. Проверка на статус суперпользователя
 if [ "$EUID" -ne 0 ]; then
-  echo "❌ Пожалуйста, запустите скрипт от имени root (sudo ./install.sh)"
+  echo "❌ Пожалуйста, запустите скрипт от имени root (sudo bash installer.sh)"
   exit 1
 fi
 
@@ -13,34 +13,38 @@ echo "=========================================="
 echo " Инициализация установщика fimOS..."
 echo "=========================================="
 
-# 2. Проверка интернета (пингуем сервера Google и Arch)
-echo "[1/2] Проверка подключения к интернету..."
+# 2. Проверка интернета
+echo "[1/3] Проверка подключения к интернету..."
 if ! ping -c 1 8.8.8.8 &> /dev/null && ! ping -c 1 archlinux.org &> /dev/null; then
     echo "❌ Ошибка: Нет подключения к интернету!"
-    echo "Пожалуйста, подключите кабель или настройте Wi-Fi (команда: iwctl или nmtui) и запустите скрипт заново."
+    echo "Настройте сеть (iwctl или nmtui) и запустите скрипт заново."
     exit 1
 fi
 echo "✅ Интернет подключен."
 
-# 3. Установка нужных утилит для работы самого скрипта
-# Флаг --needed пропустит пакеты, если они уже есть в Live-ISO
-echo "[2/2] Установка зависимостей (dialog, git, parted)..."
-pacman -Sy --noconfirm --needed dialog git parted dosfstools e2fsprogs &> /dev/null
+# 3. Установка утилит и РУССКОГО ШРИФТА
+echo "[2/3] Настройка русского языка в консоли..."
+pacman -Sy --noconfirm --needed dialog git parted dosfstools e2fsprogs terminus-font curl wget tar xz &> /dev/null
 
-# Еще одна проверка на случай, если репозитории Artix лежат и pacman ничего не скачал
-if ! command -v dialog &> /dev/null; then
-    echo "❌ Ошибка: Не удалось установить утилиту 'dialog'. Проверьте зеркала pacman."
-    exit 1
+# Применяем кириллический шрифт (Terminus)
+setfont ter-v16b || setfont cyr-sun16
+
+# 4. Подключение репозиториев CachyOS в Live-ISO (чтобы basestrap нашел ядро)
+echo "[3/3] Добавление репозиториев CachyOS..."
+if ! grep -q "cachyos" /etc/pacman.conf; then
+    curl -sL https://mirror.cachyos.org/cachyos-repo.tar.xz | tar xJ
+    cd cachyos-repo && bash cachyos-repo.sh &> /dev/null
+    cd .. && rm -rf cachyos-repo
 fi
 
 # Очистка экрана и запуск графического интерфейса
 clear
-dialog --backtitle "fimOS Installer v1.0" \
+dialog --backtitle "fimOS Installer v1.1" \
        --title " Добро пожаловать в fimOS! " \
-       --msgbox "Привет! Этот скрипт поможет тебе установить ультра-легкую fimOS на базе Artix Linux, с оптимизированным ядром CachyOS и окружением Hyprland.\n\nУбедись, что твой ноутбук подключен к питанию." 10 70
+       --msgbox "Привет! Этот скрипт установит fimOS на базе Artix Linux с ядром CachyOS.\n\nУбедись, что ноутбук подключен к питанию." 10 70
 
 # ==========================================
-# ЭТАП 1: ОПРОС ПОЛЬЗОВАТЕЛЯ (СБОР ДАННЫХ)
+# ЭТАП 1: ОПРОС ПОЛЬЗОВАТЕЛЯ
 # ==========================================
 
 USERNAME=$(dialog --stdout --inputbox "Придумайте имя пользователя (только строчные буквы, например: dima):" 10 50)
@@ -63,17 +67,17 @@ CHOICES=$(dialog --stdout --checklist "Выберите компоненты д�
 [[ "$CHOICES" == *"3"* ]] && INSTALL_PROTON="YES" || INSTALL_PROTON="NO"
 
 # ==========================================
-# ЭТАП 2: РАЗМЕТКА И МОНТИРОВАНИЕ ДИСКОВ
+# ЭТАП 2: РАЗМЕТКА И МОНТИРОВАНИЕ
 # ==========================================
 
 DISK_LIST=$(lsblk -dno NAME,SIZE | grep -v "loop" | awk '{print $1 " [" $2 "]" " off"}')
-TARGET_DISK=$(dialog --stdout --radiolist "Выберите диск для установки fimOS:" 15 60 5 $DISK_LIST)
+TARGET_DISK=$(dialog --stdout --radiolist "Выберите диск для установки:" 15 60 5 $DISK_LIST)
 [ -z "$TARGET_DISK" ] && exit 1
 DISK_PATH="/dev/$TARGET_DISK"
 
 MODE=$(dialog --stdout --menu "Выберите тип установки на $DISK_PATH:" 15 65 3 \
-    1 "Стереть весь диск (Автоматическая разметка + 2GB EFI)" \
-    2 "Дуалбут / Кастомная разметка (cfdisk + Использовать существующий EFI)")
+    1 "Стереть весь диск (Авторазметка + 2GB EFI)" \
+    2 "Дуалбут (cfdisk + выбрать существующий EFI)")
 
 EFI_BACKUP_SUPPORT="NO"
 
@@ -98,12 +102,12 @@ case $MODE in
         EFI_BACKUP_SUPPORT="YES"
         ;;
     2)
-        dialog --msgbox "Сейчас откроется утилита cfdisk.\nВыделите свободное место под fimOS (ext4), но НЕ ТРОГАЙТЕ раздел с Windows и существующий EFI!" 10 60
+        dialog --msgbox "Откроется cfdisk. Выделите место под fimOS (ext4), НЕ ТРОГАЙТЕ Windows и EFI!" 10 60
         cfdisk "$DISK_PATH"
         
         PART_LIST=$(lsblk -no NAME,SIZE "$DISK_PATH" | grep -v "loop" | awk '{print "/dev/"$1 " ["$2"]" " off"}')
         EFI_DEV=$(dialog --stdout --radiolist "Выберите СУЩЕСТВУЮЩИЙ раздел EFI (fat32):" 15 65 6 $PART_LIST)
-        ROOT_DEV=$(dialog --stdout --radiolist "Выберите созданный раздел под систему fimOS (ext4):" 15 65 6 $PART_LIST)
+        ROOT_DEV=$(dialog --stdout --radiolist "Выберите раздел под систему fimOS (ext4):" 15 65 6 $PART_LIST)
         
         mkfs.ext4 -F "$ROOT_DEV"
         
@@ -114,14 +118,9 @@ case $MODE in
         
         if [ "$EFI_SIZE" -ge 2000 ]; then
             EFI_BACKUP_SUPPORT="YES"
-            dialog --msgbox "Размер EFI: ${EFI_SIZE}MB.\nФишка бэкапа ядер CachyOS будет включена." 8 55
-        else
-            dialog --msgbox "Размер EFI: ${EFI_SIZE}MB.\nСлишком мало места для бэкапа ядер CachyOS. Установится только базовое ядро." 10 55
         fi
         ;;
-    *)
-        exit 1
-        ;;
+    *) exit 1 ;;
 esac
 
 mkdir -p /mnt
@@ -130,17 +129,28 @@ mkdir -p /mnt/boot/efi
 mount "$EFI_DEV" /mnt/boot/efi
 
 # ==========================================
-# ЭТАП 3: БАЗОВАЯ УСТАНОВКА И СИСТЕМА
+# ЭТАП 3: УСТАНОВКА БАЗЫ (ПРОВЕРКА НА ОШИБКИ)
 # ==========================================
-dialog --infobox "Шаг 1/5: Установка базовой системы Artix, Runit и ядра CachyOS..." 5 60
+dialog --infobox "Шаг 1/5: Установка Artix, Runit и ядра CachyOS...\nЭто займет время, ждите." 5 60
 
-basestrap /mnt base base-devel runit initloop-runit linux-cachyos linux-cachyos-headers sudo nano zsh networkmanager networkmanager-runit
+# Добавил linux-firmware и elogind-runit (вместо несуществующего initloop)
+if ! basestrap /mnt base base-devel runit elogind-runit linux-cachyos linux-cachyos-headers linux-firmware sudo nano zsh networkmanager networkmanager-runit; then
+    clear
+    echo "❌ ОШИБКА: Установка базовой системы (basestrap) прервалась!"
+    echo "Проверьте подключение к интернету или доступность зеркал."
+    umount -R /mnt
+    exit 1
+fi
+
 fstabgen -U /mnt >> /mnt/etc/fstab
 
+# Пробрасываем репозитории CachyOS внутрь установленной системы, чтобы она могла обновляться
+artix-chroot /mnt /bin/bash -c "curl -sL https://mirror.cachyos.org/cachyos-repo.tar.xz | tar xJ && cd cachyos-repo && bash cachyos-repo.sh && cd .. && rm -rf cachyos-repo"
+
 # ==========================================
-# ЭТАП 4: НАСТРОЙКА СИСТЕМЫ (ПОЛЬЗОВАТЕЛИ И ЛОКАЛИ)
+# ЭТАП 4: ПОЛЬЗОВАТЕЛИ И ЛОКАЛИ
 # ==========================================
-dialog --infobox "Шаг 2/5: Настройка пользователей, паролей и локализации..." 5 60
+dialog --infobox "Шаг 2/5: Настройка пользователей и языка..." 5 60
 
 if [ "$LOCALE" == "1" ]; then
     echo "ru_RU.UTF-8 UTF-8" > /mnt/etc/locale.gen
@@ -152,17 +162,14 @@ fi
 artix-chroot /mnt locale-gen
 
 artix-chroot /mnt /bin/bash -c "echo 'root:${ROOT_PASS}' | chpasswd"
-
 artix-chroot /mnt /bin/bash -c "useradd -m -G wheel,audio,video,optical,storage -s /bin/zsh ${USERNAME}"
 artix-chroot /mnt /bin/bash -c "echo '${USERNAME}:${USER_PASS}' | chpasswd"
 artix-chroot /mnt /bin/bash -c "sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers"
-
 artix-chroot /mnt /bin/bash -c "ln -s /etc/runit/sv/NetworkManager /etc/runit/runsvdir/default/"
 
 # ==========================================
-# ЭТАП 5: RUNIT АВТОЛОГИН И АВТОЗАПУСК HYPRLAND
+# ЭТАП 5: АВТОЛОГИН TTY1 И HYPRLAND
 # ==========================================
-
 mkdir -p /mnt/etc/runit/sv/agetty-tty1
 cat << EOF > /mnt/etc/runit/sv/agetty-tty1/conf
 BAUD_RATE=38400
@@ -178,14 +185,17 @@ EOF
 artix-chroot /mnt chown "${USERNAME}:${USERNAME}" "/home/${USERNAME}/.zprofile"
 
 # ==========================================
-# ЭТАП 6: ЗАГРУЗЧИК И УСТАНОВКА МОДУЛЕЙ
+# ЭТАП 6: ЗАГРУЗЧИК
 # ==========================================
 dialog --infobox "Шаг 3/5: Настройка Initcpio и загрузчика..." 4 60
 
 artix-chroot /mnt /bin/bash -c "mkinitcpio -p linux-cachyos"
 
 if [ "$EFI_BACKUP_SUPPORT" == "YES" ]; then
-    artix-chroot /mnt /bin/bash -c "pacman -S --noconfirm systemd-boot-nosystemd"
+    # Тут используем GRUB, так как systemd-boot конфликтует с runit
+    artix-chroot /mnt /bin/bash -c "pacman -S --noconfirm grub os-prober"
+    artix-chroot /mnt /bin/bash -c "grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=fimOS"
+    artix-chroot /mnt /bin/bash -c "grub-mkconfig -o /boot/grub/grub.cfg"
 else
     artix-chroot /mnt /bin/bash -c "pacman -S --noconfirm grub os-prober"
     artix-chroot /mnt /bin/bash -c "grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=fimOS"
@@ -193,9 +203,9 @@ else
 fi
 
 # ==========================================
-# ЭТАП 7: ФИНАЛЬНЫЕ КОНФИГИ И HYPRLAND
+# ЭТАП 7: ФИНАЛЬНЫЕ КОНФИГИ
 # ==========================================
-dialog --infobox "Шаг 4/5: Установка графики и дополнительных компонентов..." 4 60
+dialog --infobox "Шаг 4/5: Установка графики..." 4 60
 
 cat <<EOF > /mnt/etc/os-release
 NAME="fimOS"
@@ -210,7 +220,7 @@ if [ "$INSTALL_HYPRLAND" == "YES" ]; then
 fi
 
 # ==========================================
-# ЭТАП 8: ФИНАЛ И ПЕРЕЗАГРУЗКА
+# ЭТАП 8: ФИНАЛ
 # ==========================================
 clear
 dialog --title " Установка завершена! " \
@@ -221,5 +231,5 @@ if [ $? -eq 0 ]; then
     umount -R /mnt
     reboot
 else
-    echo "Выход в консоль Live-ISO. Не забудьте размонтировать /mnt перед перезагрузкой вручную."
+    echo "Выход в консоль. Размонтируйте /mnt перед перезагрузкой."
 fi
