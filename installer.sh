@@ -9,28 +9,33 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
+# 2. Проверка интернета (БЕЗ РУССКОГО ТЕКСТА ПОКА ЧТО)
+if ! ping -c 1 8.8.8.8 &> /dev/null && ! ping -c 1 archlinux.org &> /dev/null; then
+    echo "ERROR: No internet connection! Please connect to Wi-Fi (iwctl) or LAN."
+    exit 1
+fi
+
+# 3. УСТАНОВКА РУССКОГО ШРИФТА (САМОЕ НАЧАЛО)
+# Тихо скачиваем шрифты и базовые утилиты
+pacman -Sy --noconfirm --needed terminus-font dialog git parted dosfstools e2fsprogs curl wget tar xz &> /dev/null
+
+# Применяем кириллический шрифт (Terminus) к текущей консоли
+setfont ter-v16b || setfont cyr-sun16
+
+# ==========================================
+# ТЕПЕРЬ ВСЁ БУДЕТ НА ИДЕАЛЬНОМ РУССКОМ
+# ==========================================
 echo "=========================================="
 echo " Инициализация установщика fimOS..."
 echo "=========================================="
 
-# 2. Проверка интернета
-echo "[1/3] Проверка подключения к интернету..."
-if ! ping -c 1 8.8.8.8 &> /dev/null && ! ping -c 1 archlinux.org &> /dev/null; then
-    echo "❌ Ошибка: Нет подключения к интернету!"
-    echo "Настройте сеть (iwctl или nmtui) и запустите скрипт заново."
-    exit 1
-fi
-echo "✅ Интернет подключен."
+echo "[1/2] Настройка ключей безопасности (Artix + Arch Linux)..."
+# Это починит ошибку basestrap с подписями пакетов CachyOS
+pacman -Sy --noconfirm --needed artix-keyring archlinux-keyring artix-archlinux-support &> /dev/null
+pacman-key --init &> /dev/null
+pacman-key --populate artix archlinux &> /dev/null
 
-# 3. Установка утилит и РУССКОГО ШРИФТА
-echo "[2/3] Настройка русского языка в консоли..."
-pacman -Sy --noconfirm --needed dialog git parted dosfstools e2fsprogs terminus-font curl wget tar xz &> /dev/null
-
-# Применяем кириллический шрифт (Terminus)
-setfont ter-v16b || setfont cyr-sun16
-
-# 4. Подключение репозиториев CachyOS в Live-ISO (чтобы basestrap нашел ядро)
-echo "[3/3] Добавление репозиториев CachyOS..."
+echo "[2/2] Подключение репозиториев CachyOS..."
 if ! grep -q "cachyos" /etc/pacman.conf; then
     curl -sL https://mirror.cachyos.org/cachyos-repo.tar.xz | tar xJ
     cd cachyos-repo && bash cachyos-repo.sh &> /dev/null
@@ -39,7 +44,7 @@ fi
 
 # Очистка экрана и запуск графического интерфейса
 clear
-dialog --backtitle "fimOS Installer v1.1" \
+dialog --backtitle "fimOS Installer v1.2" \
        --title " Добро пожаловать в fimOS! " \
        --msgbox "Привет! Этот скрипт установит fimOS на базе Artix Linux с ядром CachyOS.\n\nУбедись, что ноутбук подключен к питанию." 10 70
 
@@ -70,7 +75,7 @@ CHOICES=$(dialog --stdout --checklist "Выберите компоненты д�
 # ЭТАП 2: РАЗМЕТКА И МОНТИРОВАНИЕ
 # ==========================================
 
-DISK_LIST=$(lsblk -dno NAME,SIZE | grep -v "loop" | awk '{print $1 " [" $2 "]" " off"}')
+DISK_LIST=$(lsblk -dno NAME,SIZE | grep -v "loop" | grep -v "airootfs" | awk '{print $1 " [" $2 "]" " off"}')
 TARGET_DISK=$(dialog --stdout --radiolist "Выберите диск для установки:" 15 60 5 $DISK_LIST)
 [ -z "$TARGET_DISK" ] && exit 1
 DISK_PATH="/dev/$TARGET_DISK"
@@ -129,23 +134,27 @@ mkdir -p /mnt/boot/efi
 mount "$EFI_DEV" /mnt/boot/efi
 
 # ==========================================
-# ЭТАП 3: УСТАНОВКА БАЗЫ (ПРОВЕРКА НА ОШИБКИ)
+# ЭТАП 3: УСТАНОВКА БАЗЫ (С ЛОГИРОВАНИЕМ)
 # ==========================================
-dialog --infobox "Шаг 1/5: Установка Artix, Runit и ядра CachyOS...\nЭто займет время, ждите." 5 60
+dialog --infobox "Шаг 1/5: Установка Artix, Runit и ядра CachyOS...\nЭто займет время (зависит от интернета), ждите." 5 60
 
-# Добавил linux-firmware и elogind-runit (вместо несуществующего initloop)
-if ! basestrap /mnt base base-devel runit elogind-runit linux-cachyos linux-cachyos-headers linux-firmware sudo nano zsh networkmanager networkmanager-runit; then
+# Запускаем установку и пишем весь вывод в файл лога, чтобы не ломать интерфейс
+if ! basestrap /mnt base base-devel runit elogind-runit linux-cachyos linux-cachyos-headers linux-firmware sudo nano zsh networkmanager networkmanager-runit > /tmp/basestrap.log 2>&1; then
     clear
     echo "❌ ОШИБКА: Установка базовой системы (basestrap) прервалась!"
-    echo "Проверьте подключение к интернету или доступность зеркал."
+    echo "--------------------------------------------------------"
+    echo "ПОСЛЕДНИЕ СТРОКИ ЛОГА ОШИБКИ:"
+    tail -n 15 /tmp/basestrap.log
+    echo "--------------------------------------------------------"
+    echo "Сделайте фото этих строк или проверьте подключение к сети."
     umount -R /mnt
     exit 1
 fi
 
 fstabgen -U /mnt >> /mnt/etc/fstab
 
-# Пробрасываем репозитории CachyOS внутрь установленной системы, чтобы она могла обновляться
-artix-chroot /mnt /bin/bash -c "curl -sL https://mirror.cachyos.org/cachyos-repo.tar.xz | tar xJ && cd cachyos-repo && bash cachyos-repo.sh && cd .. && rm -rf cachyos-repo"
+# Пробрасываем репозитории CachyOS внутрь установленной системы
+artix-chroot /mnt /bin/bash -c "curl -sL https://mirror.cachyos.org/cachyos-repo.tar.xz | tar xJ && cd cachyos-repo && bash cachyos-repo.sh && cd .. && rm -rf cachyos-repo" > /dev/null 2>&1
 
 # ==========================================
 # ЭТАП 4: ПОЛЬЗОВАТЕЛИ И ЛОКАЛИ
@@ -159,7 +168,7 @@ else
     echo "en_US.UTF-8 UTF-8" > /mnt/etc/locale.gen
     echo "LANG=en_US.UTF-8" > /mnt/etc/locale.conf
 fi
-artix-chroot /mnt locale-gen
+artix-chroot /mnt locale-gen > /dev/null 2>&1
 
 artix-chroot /mnt /bin/bash -c "echo 'root:${ROOT_PASS}' | chpasswd"
 artix-chroot /mnt /bin/bash -c "useradd -m -G wheel,audio,video,optical,storage -s /bin/zsh ${USERNAME}"
@@ -189,23 +198,16 @@ artix-chroot /mnt chown "${USERNAME}:${USERNAME}" "/home/${USERNAME}/.zprofile"
 # ==========================================
 dialog --infobox "Шаг 3/5: Настройка Initcpio и загрузчика..." 4 60
 
-artix-chroot /mnt /bin/bash -c "mkinitcpio -p linux-cachyos"
+artix-chroot /mnt /bin/bash -c "mkinitcpio -p linux-cachyos" > /dev/null 2>&1
 
-if [ "$EFI_BACKUP_SUPPORT" == "YES" ]; then
-    # Тут используем GRUB, так как systemd-boot конфликтует с runit
-    artix-chroot /mnt /bin/bash -c "pacman -S --noconfirm grub os-prober"
-    artix-chroot /mnt /bin/bash -c "grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=fimOS"
-    artix-chroot /mnt /bin/bash -c "grub-mkconfig -o /boot/grub/grub.cfg"
-else
-    artix-chroot /mnt /bin/bash -c "pacman -S --noconfirm grub os-prober"
-    artix-chroot /mnt /bin/bash -c "grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=fimOS"
-    artix-chroot /mnt /bin/bash -c "grub-mkconfig -o /boot/grub/grub.cfg"
-fi
+artix-chroot /mnt /bin/bash -c "pacman -S --noconfirm grub os-prober" > /dev/null 2>&1
+artix-chroot /mnt /bin/bash -c "grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=fimOS" > /dev/null 2>&1
+artix-chroot /mnt /bin/bash -c "grub-mkconfig -o /boot/grub/grub.cfg" > /dev/null 2>&1
 
 # ==========================================
 # ЭТАП 7: ФИНАЛЬНЫЕ КОНФИГИ
 # ==========================================
-dialog --infobox "Шаг 4/5: Установка графики..." 4 60
+dialog --infobox "Шаг 4/5: Установка дополнительных компонентов..." 4 60
 
 cat <<EOF > /mnt/etc/os-release
 NAME="fimOS"
@@ -215,7 +217,7 @@ LIKE=artix
 EOF
 
 if [ "$INSTALL_HYPRLAND" == "YES" ]; then
-    git clone "https://github.com/dimonchik235/fimos-hyprland.git" /mnt/opt/fimos-hyprland
+    git clone "https://github.com/dimonchik235/fimos-hyprland.git" /mnt/opt/fimos-hyprland > /dev/null 2>&1
     artix-chroot /mnt /bin/bash -c "cd /opt/fimos-hyprland && chmod +x hypr-install.sh && ./hypr-install.sh ${USERNAME}"
 fi
 
